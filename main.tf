@@ -71,7 +71,7 @@ resource "aws_sns_topic_subscription" "sns_notify_teams" {
 
 module "lambda" {
   source  = "terraform-aws-modules/lambda/aws"
-  version = "8.1.0"
+  version = "7.21.1"
 
   create = var.create
 
