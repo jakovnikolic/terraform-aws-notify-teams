@@ -56,6 +56,110 @@ class FactSet:
         }
 
 
+class Fact:
+    def __init__(self, title: str, value: str):
+        self.title = title
+        self.value = value
+    
+    def to_dict(self) -> Dict[str, str]:
+        return {
+            "title": self.title,
+            "value": self.value
+        }
+
+
+class FactSetBlock:
+    def __init__(self, facts: List[Fact], spacing: Optional[str] = None, separator: Optional[bool] = None):
+        self.facts = facts
+        self.spacing = spacing
+        self.separator = separator
+    
+    def to_dict(self) -> Dict[str, Any]:
+        result = {
+            "type": "FactSet",
+            "facts": [fact.to_dict() for fact in self.facts]
+        }
+        if self.spacing:
+            result["spacing"] = self.spacing
+        if self.separator is not None:
+            result["separator"] = self.separator
+        return result
+
+
+class Action:
+    def __init__(self, type_: str, title: str, url: Optional[str] = None, style: Optional[str] = None):
+        self.type = type_
+        self.title = title
+        self.url = url
+        self.style = style
+    
+    def to_dict(self) -> Dict[str, Any]:
+        result = {
+            "type": self.type,
+            "title": self.title
+        }
+        if self.url:
+            result["url"] = self.url
+        if self.style:
+            result["style"] = self.style
+        return result
+
+
+class TableColumn:
+    def __init__(self, width: Optional[str] = None):
+        self.width = width
+    
+    def to_dict(self) -> Dict[str, Any]:
+        result = {"type": "TableColumnDefinition"}
+        if self.width:
+            result["width"] = self.width
+        return result
+
+
+class TableCell:
+    def __init__(self, items: List['BodyBlock']):
+        self.items = items
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": "TableCell",
+            "items": [item.to_dict() for item in self.items]
+        }
+
+
+class TableRow:
+    def __init__(self, cells: List[TableCell]):
+        self.cells = cells
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "type": "TableRow",
+            "cells": [cell.to_dict() for cell in self.cells]
+        }
+
+
+class Table:
+    def __init__(self, columns: List[TableColumn], rows: List[TableRow], first_row_as_header: bool = True,
+                 show_grid_lines: bool = False, spacing: Optional[str] = None):
+        self.columns = columns
+        self.rows = rows
+        self.first_row_as_header = first_row_as_header
+        self.show_grid_lines = show_grid_lines
+        self.spacing = spacing
+    
+    def to_dict(self) -> Dict[str, Any]:
+        result = {
+            "type": "Table",
+            "columns": [column.to_dict() for column in self.columns],
+            "rows": [row.to_dict() for row in self.rows],
+            "firstRowAsHeader": self.first_row_as_header,
+            "showGridLines": self.show_grid_lines
+        }
+        if self.spacing:
+            result["spacing"] = self.spacing
+        return result
+
+
 class ColumnSet:
     def __init__(self, type_: str = "Column", width: Optional[str] = None, items: Optional[List['BodyBlock']] = None):
         self.type = type_
@@ -73,12 +177,13 @@ class ColumnSet:
 
 
 class BodyBlock:
-    def __init__(self, type_: str, text: Optional[str] = None, weight: Optional[str] = None, 
+    def __init__(self, type_: str = None, text: Optional[str] = None, weight: Optional[str] = None, 
                  size: Optional[str] = None, color: Optional[str] = None, facts: Optional[List[FactSet]] = None,
                  columns: Optional[List[ColumnSet]] = None, items: Optional[List['BodyBlock']] = None,
                  style: Optional[str] = None, spacing: Optional[str] = None, separator: Optional[bool] = None,
                  horizontal_alignment: Optional[str] = None, vertical_content_alignment: Optional[str] = None,
-                 wrap: Optional[bool] = None):
+                 wrap: Optional[bool] = None, fact_set_block: Optional[FactSetBlock] = None,
+                 table: Optional[Table] = None):
         self.type = type_
         self.text = text
         self.weight = weight
@@ -93,8 +198,16 @@ class BodyBlock:
         self.horizontal_alignment = horizontal_alignment
         self.vertical_content_alignment = vertical_content_alignment
         self.wrap = wrap
+        self.fact_set_block = fact_set_block
+        self.table = table
     
     def to_dict(self) -> Dict[str, Any]:
+        # Handle special cases for FactSet and Table
+        if self.fact_set_block:
+            return self.fact_set_block.to_dict()
+        if self.table:
+            return self.table.to_dict()
+            
         result = {"type": self.type}
         
         if self.text is not None:
@@ -129,19 +242,24 @@ class BodyBlock:
 
 class Content:
     def __init__(self, schema: str = "http://adaptivecards.io/schemas/adaptive-card.json",
-                 type_: str = "AdaptiveCard", version: str = "1.2", body: Optional[List[BodyBlock]] = None):
+                 type_: str = "AdaptiveCard", version: str = "1.2", body: Optional[List[BodyBlock]] = None,
+                 actions: Optional[List[Action]] = None):
         self.schema = schema
         self.type = type_
         self.version = version
         self.body = body or []
+        self.actions = actions or []
     
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        result = {
             "$schema": self.schema,
             "type": self.type,
             "version": self.version,
             "body": [block.to_dict() for block in self.body]
         }
+        if self.actions:
+            result["actions"] = [action.to_dict() for action in self.actions]
+        return result
 
 
 class Attachment:
@@ -169,6 +287,228 @@ class TeamsMessage:
             "type": self.type,
             "attachments": [attachment.to_dict() for attachment in self.attachments]
         }
+
+def create_cost_anomaly_message(message_json: Dict[str, Any]) -> TeamsMessage:
+    """Create an adaptive card message for AWS Cost Anomaly alerts"""
+    logger.info("Processing AWS Cost Anomaly message")
+    
+    # Extract key information
+    account_name = message_json.get('accountName', 'Unknown Account')
+    monitor_name = message_json.get('monitorName', 'Unknown Monitor')
+    anomaly_start = message_json.get('anomalyStartDate', '')
+    anomaly_end = message_json.get('anomalyEndDate', '')
+    
+    # Impact information
+    impact = message_json.get('impact', {})
+    total_actual = impact.get('totalActualSpend', 0)
+    total_expected = impact.get('totalExpectedSpend', 0)
+    total_impact = impact.get('totalImpact', 0)
+    impact_percentage = impact.get('totalImpactPercentage', 0)
+    
+    # Anomaly score
+    anomaly_score = message_json.get('anomalyScore', {})
+    current_score = anomaly_score.get('currentScore', 0)
+    max_score = anomaly_score.get('maxScore', 0)
+    
+    # Root causes (limit to top 5)
+    root_causes = message_json.get('rootCauses', [])[:5]
+    
+    # Anomaly details link
+    details_link = message_json.get('anomalyDetailsLink', '')
+    
+    # Format currency values
+    def format_currency(amount):
+        return f"${amount:.2f}"
+    
+    # Create the adaptive card content
+    body_blocks = [
+        # Header
+        BodyBlock(
+            type_="Container",
+            style="attention",
+            items=[
+                BodyBlock(
+                    type_="TextBlock",
+                    text=f"💰 ⚠️ AWS Cost Anomaly Detected",
+                    weight="Bolder",
+                    size="Large",
+                    color="Attention",
+                    wrap=True
+                )
+            ],
+            spacing="Medium"
+        ),
+        
+        # Account and Monitor Info
+        BodyBlock(
+            fact_set_block=FactSetBlock([
+                Fact("📊 Account", account_name),
+                Fact("🔍 Monitor", monitor_name),
+                Fact("📅 Period", f"{anomaly_start[:10]} to {anomaly_end[:10]}"),
+                Fact("🎯 Anomaly Score", f"{current_score:.2f} (max: {max_score:.2f})")
+            ], spacing="Medium")
+        ),
+        
+        # Cost Impact Summary
+        BodyBlock(
+            type_="Container",
+            style="emphasis",
+            spacing="Large",
+            items=[
+                BodyBlock(
+                    type_="TextBlock",
+                    text="💸 **Cost Impact Analysis**",
+                    weight="Bolder",
+                    size="Medium",
+                    color="default",
+                    wrap=True
+                ),
+                BodyBlock(
+                    type_="ColumnSet",
+                    spacing="Medium",
+                    columns=[
+                        ColumnSet(
+                            width="50%",
+                            items=[
+                                BodyBlock(
+                                    type_="TextBlock",
+                                    text="**Expected Spend:**",
+                                    weight="Bolder",
+                                    color="good",
+                                    wrap=True
+                                ),
+                                BodyBlock(
+                                    type_="TextBlock",
+                                    text=format_currency(total_expected),
+                                    color="good",
+                                    size="Large",
+                                    weight="Bolder",
+                                    wrap=True
+                                )
+                            ]
+                        ),
+                        ColumnSet(
+                            width="50%",
+                            items=[
+                                BodyBlock(
+                                    type_="TextBlock",
+                                    text="**Actual Spend:**",
+                                    weight="Bolder",
+                                    color="attention",
+                                    wrap=True
+                                ),
+                                BodyBlock(
+                                    type_="TextBlock",
+                                    text=format_currency(total_actual),
+                                    color="attention",
+                                    size="Large",
+                                    weight="Bolder",
+                                    wrap=True
+                                )
+                            ]
+                        )
+                    ]
+                ),
+                BodyBlock(
+                    type_="Container",
+                    style="attention",
+                    spacing="Small",
+                    items=[
+                        BodyBlock(
+                            type_="TextBlock",
+                            text=f"**Overspend: {format_currency(total_impact)} ({impact_percentage:.1f}% increase)**",
+                            weight="Bolder",
+                            size="Medium",
+                            color="attention",
+                            wrap=True,
+                            horizontal_alignment="Center"
+                        )
+                    ]
+                )
+            ]
+        )
+    ]
+    
+    # Add root causes table if available
+    if root_causes:
+        # Create table columns
+        table_columns = [
+            TableColumn(width="3"),  # Service (wider)
+            TableColumn(width="2"),  # Account
+            TableColumn(width="1")   # Impact %
+        ]
+        
+        # Create header row
+        header_row = TableRow([
+            TableCell([BodyBlock(type_="TextBlock", text="**Service**", weight="Bolder", wrap=True)]),
+            TableCell([BodyBlock(type_="TextBlock", text="**Account**", weight="Bolder", wrap=True)]),
+            TableCell([BodyBlock(type_="TextBlock", text="**Impact %**", weight="Bolder", wrap=True)])
+        ])
+        
+        # Create data rows
+        data_rows = []
+        for cause in root_causes:
+            service = cause.get('service', 'Unknown Service')
+            account_name = cause.get('linkedAccountName', 'Unknown')
+            impact_contrib = cause.get('impactContribution', 0)
+            
+            # Truncate long service names
+            if len(service) > 35:
+                service = service[:32] + "..."
+                
+            data_rows.append(TableRow([
+                TableCell([BodyBlock(type_="TextBlock", text=service, wrap=True, size="Small")]),
+                TableCell([BodyBlock(type_="TextBlock", text=account_name, wrap=True, size="Small")]),
+                TableCell([BodyBlock(type_="TextBlock", text=f"{impact_contrib:.1f}%", wrap=True, size="Small", color="attention")])
+            ]))
+        
+        # Add the table to body blocks
+        body_blocks.append(
+            BodyBlock(
+                type_="Container",
+                style="default",
+                spacing="Large",
+                items=[
+                    BodyBlock(
+                        type_="TextBlock",
+                        text=f"🔍 **Top {len(root_causes)} Contributing Services**",
+                        weight="Bolder",
+                        size="Medium",
+                        color="default",
+                        wrap=True
+                    ),
+                    BodyBlock(
+                        table=Table(
+                            columns=table_columns,
+                            rows=[header_row] + data_rows,
+                            first_row_as_header=True,
+                            show_grid_lines=True,
+                            spacing="Small"
+                        )
+                    )
+                ]
+            )
+        )
+    
+    # Create actions
+    actions = []
+    if details_link:
+        actions.append(Action(
+            type_="Action.OpenUrl",
+            title="🔗 View in AWS Console",
+            url=details_link,
+            style="positive"
+        ))
+    
+    # Create the content
+    content = Content(
+        body=body_blocks,
+        actions=actions
+    )
+    
+    attachment = Attachment(content=content)
+    return TeamsMessage(attachments=[attachment])
+
 
 def create_cloudtrail_message(message_json_detail: Dict[str, Any]) -> TeamsMessage:
     """Create an adaptive card message for CloudTrail events"""
@@ -612,6 +952,16 @@ def send_teams_message(teams_message: TeamsMessage) -> None:
         logger.error("Server connection failed: %s", e.reason)
 
 
+def is_cost_anomaly_message(message_json: Dict[str, Any]) -> bool:
+    """Detect if this is an AWS Cost Anomaly message"""
+    return (
+        'accountId' in message_json and 
+        'anomalyId' in message_json and
+        'monitorArn' in message_json and
+        'impact' in message_json
+    )
+
+
 def lambda_handler(event, context):
     logger.info("Event: %s", json.dumps(event))
     
@@ -632,6 +982,9 @@ def lambda_handler(event, context):
         elif 'detail-type' in message_json and message_json['detail-type'] == 'AWS Service Event via CloudTrail':
             logger.info("Processing CloudTrail message")
             teams_message = create_cloudtrail_message(message_json['detail'])
+        elif is_cost_anomaly_message(message_json):
+            logger.info("Processing AWS Cost Anomaly message")
+            teams_message = create_cost_anomaly_message(message_json)
         else:
             logger.info("Processing generic SNS message - no specific handler found")
             teams_message = create_generic_message(sns_record)
